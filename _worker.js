@@ -951,7 +951,7 @@ function generateRandomIPv6(prefixStr) {
 }
 
 function randomBigInt(min, max) {
-    const range = max - min + 1n;
+    const range = max - min + BigInt(1);
     const bits = range.toString(2).length;
     let rand;
     const maxAttempts = 10;
