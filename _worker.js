@@ -2,7 +2,7 @@
  * DOH-ECH — Simplified DoH Worker
  * - Dual upstream DNS (AdGuard + Cloudflare) with Promise.any race
  * - ECH injection from specified domain's HTTPS record
- * - Enhance mode (BUILTIN_HINTS + custom rules)
+ * - Enhance mode (custom rules via rules param)
  * - ECS support, shuffle
  * - Web frontend + JSON API
  * - /ech and /doh endpoints
@@ -23,47 +23,6 @@ const UPSTREAM_DNS_CLOUDFLARE = 'https://cloudflare-dns.com/dns-query';
 const UPSTREAM_JSON_CLOUDFLARE = 'https://cloudflare-dns.com/dns-query';
 const SVC_PARAM_IDS = { mandatory: 0, alpn: 1, "no-default-alpn": 2, port: 3, ipv4hint: 4, ech: 5, ipv6hint: 6 };
 
-// Enhance mode built-in rules
-const BUILTIN_HINTS = [
-    {
-        hosts: ["https://raw.hellogithub.com/hosts.json"],
-        noA: false, noAAAA: true
-    },
-    {
-        domains: [ "*.google.com.hk", "*.google.com","*.googleapis.com", "*.services.googleapis.cn", "*.services.google.com", "*.accounts.google.com","*.youtube.com", "*.youtube-nocookie.com", "*.googleapis.cn","*.recaptcha.net"],
-        ips: ["2001:4860:4826:7700::/64", "2001:4860:4827:7700::/64", "2001:4860:4828:7700::/64", "2001:4860:4829:7700::/64", "2001:4860:482a:7700::/64", "2001:4860:482b:7700::/64", "2001:4860:482c:7700::/64", "2001:4860:482d:7700::/64"],
-        noA: true, noAAAA: false
-    },
-    {
-        domains: ["*.googlevideo.com"],
-        ips: [],
-        noA: true, noAAAA: false
-    },
-    {
-        domains: ["*.googlesource.com","*.gstatic.com", "*.googleusercontent.com", "*.ytimg.com", "*.ggpht.com", "*.gvt1.com","*.gvt2.com","*.googleadservices.com","*.googlesyndication.com","*.google-analytics.com","*.crashlytics.com","firebaseio.com","firebasedatabase.app"],
-        ips: ["2001:4860:4826:7700::/64", "2001:4860:4827:7700::/64", "2001:4860:4828:7700::/64", "2001:4860:4829:7700::/64", "2001:4860:482a:7700::/64", "2001:4860:482b:7700::/64", "2001:4860:482c:7700::/64", "2001:4860:482d:7700::/64"],
-        noA: true, noAAAA: false
-    },
-    {
-        domains: ["*.meta.com","*.facebook.com", "*.fb.com","*.instagram.com", "*.cdninstagram.com", "*.fbcdn.net", "*.threads.net"],
-        ips: [],
-        noA: true, noAAAA: false
-    },
-    {
-        domains: ["*.wikipedia.org", "*.wikimedia.org", "*.wikibooks.org", "*.wikidata.org"],
-        ips: [], noA: true, noAAAA: false
-    },
-    { domains: ["*.docker.com", "*.docker.io", "*.production.cloudflare.docker.com"], ips: [], noA: true, noAAAA: false },
-    { domains: ["*.reddit.com", "*.redd.it", "*.redditmedia.com", "*.redditstatic.com"], ips: ["151.101.1.140", "151.101.65.140", "151.101.129.140", "151.101.193.140"], noA: false, noAAAA: true },
-    { domains: ["*.imgur.com", "*.i.imgur.com", "*.api.imgur.com", "*.s.imgur.com"], ips: ["151.101.1.193", "151.101.65.193", "151.101.129.193", "151.101.193.193"], noA: false, noAAAA: true },
-    { domains: ["*.giphy.com", "*.media.giphy.com", "*.giphy.gif", "*.api.giphy.com"], ips: ["151.101.1.132", "151.101.65.132", "151.101.129.132", "151.101.193.132"], noA: false, noAAAA: true },
-    { domains: ["*.pypi.org", "*.pythonhosted.org", "*.files.pythonhosted.org"], ips: ["151.101.1.223", "151.101.65.223", "151.101.129.223", "151.101.193.223"], noA: false, noAAAA: true },
-    { domains: ["*.stackoverflow.com", "*.stackexchange.com", "*.sstatic.net"], ips: ["151.101.1.69", "151.101.65.69", "151.101.129.69", "151.101.193.69"], noA: false, noAAAA: true },
-    { domains: ["*.duckduckgo.com", "*.ddg.gg", "*.icons.duckduckgo.com"], ips: ["151.101.1.181", "151.101.65.181", "151.101.129.181", "151.101.193.181"], noA: false, noAAAA: true },
-    { domains: ["*.medium.com", "*.readmedium.com", "*.miro.medium.com"], ips: ["151.101.1.162", "151.101.65.162", "151.101.129.162", "151.101.193.162"], noA: false, noAAAA: true },
-    { domains: ["*.pinterest.com", "*.pinimg.com", "*.pinterest.io", "*.media.pinterest.com"], ips: ["151.101.1.84", "151.101.65.84", "151.101.129.84", "151.101.193.84"], noA: false, noAAAA: true }
-];
-
 // ===================== 缓存逻辑 =====================
 const cacheMap = new Map();
 const CACHE_TTL = 3600 * 1000;
@@ -72,8 +31,6 @@ const PREFIX_CACHE_TTL = 30 * 60 * 1000;
 const prefixCache = new Map();
 const MAX_PRESCREEN = 10;
 const MAX_FINAL = 6;
-const HOSTS_CACHE_TTL = 12 * 3600 * 1000;
-const hostsCache = new Map();
 
 // ===================== 参数构建 =====================
 function buildConfig(url, headers = null) {
@@ -94,7 +51,6 @@ function buildConfig(url, headers = null) {
 // ===================== Worker 入口 =====================
 export default {
     async fetch(req, env, ctx) {
-        ctx.waitUntil(getBuiltinRulesMap());
         const url = new URL(req.url);
         if (url.pathname === '/log') return handleLogsRequest();
         const clientIP = url.searchParams.get('clientIp') || req.headers.get('X-ClientIP') || req.headers.get('CF-Connecting-IP') || '1.2.4.8';
@@ -333,103 +289,10 @@ async function collectIpHints(domain, config, clientIP, source) {
 }
 
 // ===================== 规则匹配 =====================
-let builtinRulesMap = null;
-
-async function getBuiltinRulesMap() {
-    if (builtinRulesMap) return builtinRulesMap;
-
-    const map = new Map();
-    const hints = BUILTIN_HINTS;
-
-    if (Array.isArray(hints)) {
-        for (const group of hints) {
-            if (group.hosts && Array.isArray(group.hosts)) {
-                const noA = group.noA || false;
-                const noAAAA = group.noAAAA || false;
-                const hostIpsMap = new Map();
-
-                for (const url of group.hosts) {
-                    let data = null;
-                    const cached = hostsCache.get(url);
-
-                    if (cached && Date.now() < cached.expire) {
-                        data = cached.data;
-                    } else {
-                        try {
-                            const controller = new AbortController();
-                            const timer = setTimeout(() => controller.abort(), 5000);
-                            const res = await fetch(url, { signal: controller.signal });
-                            clearTimeout(timer);
-                            if (res.ok) {
-                                data = await res.json();
-                                hostsCache.set(url, {
-                                    data: data,
-                                    expire: Date.now() + HOSTS_CACHE_TTL
-                                });
-                            } else if (cached) {
-                                data = cached.data;
-                            }
-                        } catch (e) {
-                            console.error('Fetch hosts error:', url, e);
-                            if (cached) data = cached.data;
-                        }
-                    }
-
-                    if (data && Array.isArray(data)) {
-                        for (const entry of data) {
-                            let domain, ip;
-                            if (typeof entry === 'object' && !Array.isArray(entry)) {
-                                domain = entry.domain || entry.host || '';
-                                ip = entry.ip || entry.addr || '';
-                            } else if (Array.isArray(entry) && entry.length >= 2) {
-                                ip = entry[0];
-                                domain = entry[1];
-                            }
-                            if (domain && ip) {
-                                if (!hostIpsMap.has(domain)) hostIpsMap.set(domain, new Set());
-                                hostIpsMap.get(domain).add(ip);
-                            }
-                        }
-                    }
-                }
-
-                for (const [domain, ipSet] of hostIpsMap.entries()) {
-                    const ips = Array.from(ipSet);
-                    map.set(domain, { ips, noA, noAAAA });
-                }
-            }
-        }
-
-        for (const group of hints) {
-            if (group.domains && Array.isArray(group.domains)) {
-                const { ips = [], noA = false, noAAAA = false } = group;
-                const ruleObj = { ips, noA, noAAAA };
-                for (const d of group.domains) {
-                    map.set(d, ruleObj);
-                }
-            }
-        }
-    } else {
-        for (const [domain, val] of Object.entries(hints)) {
-            map.set(domain, {
-                ips: Array.isArray(val) ? val : (val.ips || []),
-                noA: val.noA || false,
-                noAAAA: val.noAAAA || false
-            });
-        }
-    }
-
-    builtinRulesMap = map;
-    return map;
-}
-
 async function matchRule(domain, config) {
-    const merged = new Map(await getBuiltinRulesMap());
+    if (!config.rules) return null;
+    const merged = parseRules(config.rules);
     for (const [key, rule] of merged) { rule.ips = rule.ips.flatMap(ip => ip.includes('/') ? getPrefixIPs(ip) : [ip]); }
-    if (config.rules) {
-        const user = parseRules(config.rules);
-        for (const [k, v] of user) merged.set(k, v);
-    }
     const matched = [];
     for (const [pattern, ruleObj] of merged) {
         if (matchDomainPattern(domain, pattern)) {
@@ -585,24 +448,10 @@ async function handleLogsRequest() {
         uptime: uptimeFormatted,
         startedAt: new Date(startedTimestamp).toISOString(),
     };
-    const builtinRules = {};
-    for (const [domain, rule] of Object.entries(BUILTIN_HINTS)) {
-        builtinRules[domain] = {
-            domains: rule.domains || [],
-            ips: rule.ips || (Array.isArray(rule) ? rule : []),
-            noA: rule.noA || false,
-            noAAAA: rule.noAAAA || false,
-        };
-    }
-    const builtinHints = {
-        _description: '内置增强规则 (BUILTIN_HINTS)',
-        rules: builtinRules,
-    };
     const payload = {
         timestamp: new Date(now).toISOString(),
         runtime: runtime,
-        globalDefaults: globalDefaults,
-        builtinHints: builtinHints
+        globalDefaults: globalDefaults
     };
     return json(payload);
 }
