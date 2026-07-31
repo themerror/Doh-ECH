@@ -27,7 +27,7 @@
 - **DoH 服务** — GET/POST 标准 DNS-over-HTTPS，兼容 Chrome/Firefox/代理客户端
 - **ECH 注入** — 从指定域名的 HTTPS 记录动态获取 ECH 公钥，注入响应中加密 SNI
 - **双上游竞速** — AdGuard DNS + Cloudflare DNS 并发查询，取最快响应（Promise.any）
-- **增强模式** — 内置 + 自定义规则，精细控制每个域名的 DNS 应答（IP hints、ALPN、记录屏蔽）
+- **增强模式** — 通过 `rules` 参数自定义规则，精细控制域名 DNS 应答（IP hints、ALPN、记录屏蔽）
 - **Edge 缓存** — Cloudflare Cache API 缓存DNS 结果（A/AAAA 300s，HTTPS 600s，ECH 3600s）
 - **ECS 就近解析** — 自动获取客户端真实 IP 构造 EDNS Client Subnet
 
@@ -134,22 +134,6 @@ X-ECH: cloudflare-ech.com
 X-ClientIP: 1.2.4.8
 X-Rules: *.google.com::noA
 ```
-
----
-
-## 内置规则
-
-`BUILTIN_HINTS` 预设了多组规则（编辑 `_worker.js` 修改）：
-
-| 规则组 | 效果 |
-|--------|------|
-| Google 服务 | `*.google.com`、`*.youtube.com` 等 → 注入 Google IPv6 前缀，屏蔽 A |
-| Google 视频 | `*.googlevideo.com` → 纯 IPv6 |
-| Google 静态 | `*.gstatic.com`、`*.ytimg.com` 等 → 注入 IPv6 前缀，屏蔽 A |
-| GitHub hosts | 从 `raw.hellogithub.com/hosts.json` 拉取 IP |
-| Meta 全家桶 | `*.facebook.com`、`*.instagram.com` 等 → 屏蔽 A |
-| Wikipedia | `*.wikipedia.org` 等 → 屏蔽 A |
-| Fastly CDN | Reddit、Imgur、StackOverflow、PyPI、DuckDuckGo、Medium、Pinterest 等 → 注入 Fastly IPv4 hints，屏蔽 AAAA |
 
 ---
 
