@@ -519,20 +519,35 @@ async function queryUpstreamDNS(name, type, clientIP = '', upstreamUrl = null) {
     const urls = upstreamUrl
         ? [upstreamUrl + '?' + params.toString()]
         : [UPSTREAM_JSON_ADGUARD + '?' + params.toString(), UPSTREAM_JSON_CLOUDFLARE + '?' + params.toString()];
-    const promises = urls.map(url =>
-        fetch(url, { headers: { 'Accept': 'application/dns-json' } })
-            .then(res => res.ok ? res.json() : Promise.reject())
-    );
 
     let result;
-    try {
-        result = await Promise.any(promises);
-    } catch {
+    // For HTTPS (type 65), prefer AdGuard which returns text-format ech=... data;
+    // Cloudflare DNS JSON API returns hex wire format that lacks readable ech field
+    if (type === 65) {
         try {
             const res = await fetch(urls[0], { headers: { 'Accept': 'application/dns-json' } });
             if (res.ok) result = await res.json();
-            else return null;
-        } catch { return null; }
+            else throw new Error('AdGuard failed');
+        } catch {
+            try {
+                const res = await fetch(urls[1], { headers: { 'Accept': 'application/dns-json' } });
+                if (res.ok) result = await res.json();
+                else return null;
+            } catch { return null; }
+        }
+    } else {
+        try {
+            result = await Promise.any(urls.map(url =>
+                fetch(url, { headers: { 'Accept': 'application/dns-json' } })
+                    .then(res => res.ok ? res.json() : Promise.reject())
+            ));
+        } catch {
+            try {
+                const res = await fetch(urls[0], { headers: { 'Accept': 'application/dns-json' } });
+                if (res.ok) result = await res.json();
+                else return null;
+            } catch { return null; }
+        }
     }
 
     if (result && typeof caches !== 'undefined' && caches.default) {
