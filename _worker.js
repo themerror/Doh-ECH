@@ -567,7 +567,10 @@ function parseHttpsRecord(dataStr) {
     if (parts.length < 3) return null;
     const result = {};
     for (let i = 2; i < parts.length; i++) {
-        const [k, v] = parts[i].split('=');
+        const eqIdx = parts[i].indexOf('=');
+        if (eqIdx === -1) continue;
+        const k = parts[i].substring(0, eqIdx);
+        const v = parts[i].substring(eqIdx + 1);
         if (k === 'ech') result.ech = v;
         else if (k === 'alpn') result.alpn = v;
     }
@@ -1027,7 +1030,10 @@ function parseHttpsRecordFull(dataStr) {
     if (parts.length < 3) return null;
     const result = {};
     for (let i = 2; i < parts.length; i++) {
-        const [k, v] = parts[i].split('=');
+        const eqIdx = parts[i].indexOf('=');
+        if (eqIdx === -1) continue;
+        const k = parts[i].substring(0, eqIdx);
+        const v = parts[i].substring(eqIdx + 1);
         if (!k || !v) continue;
         if (k === 'ech') result.ech = v;
         else if (k === 'alpn') result.alpn = v;
