@@ -671,7 +671,7 @@ function encodeSvcParam(key, value) {
     }
     else {
         try {
-            let b64 = value.replace(/-/g, '+').replace(/_/g, '/');
+            let b64 = value.replace(/^"|"$/g, '').replace(/-/g, '+').replace(/_/g, '/');
             while (b64.length % 4) b64 += '=';
             const s = atob(b64);
             valBuf = new Uint8Array(s.length);
